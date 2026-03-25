@@ -2739,7 +2739,7 @@ document.addEventListener('click',function(e){
   }
 });
 </script>
-<!-- OneDrive / Microsoft Graph Integration v27 -->
+<!-- OneDrive / Microsoft Graph Integration v28 -->
 <script>
 var OD_CONFIG = {
   clientId: 'SEU_CLIENT_ID_AQUI',
@@ -2748,133 +2748,176 @@ var OD_CONFIG = {
   scopes: ['Files.Read', 'User.Read'],
   shareUrl: 'https://1drv.ms/x/c/6d702c26a5c28103/IQD-VerppPQIRoC88l2EXf5wAUricDgIGcU6lgJW-E3CKkA'
 };
-var _msalApp=null, _odAccount=null;
+var _msalApp = null, _odAccount = null;
 
-function odCloseSetup(){
-  var m=document.getElementById('od-setup-modal');
-  if(m)m.style.display='none';
-}
-
-function odInit(){
-  if(!window.msal)return null;
-  if(_msalApp)return _msalApp;
-  if(!OD_CONFIG.clientId||OD_CONFIG.clientId==='SEU_CLIENT_ID_AQUI')return null;
-  try{
-    _msalApp=new msal.PublicClientApplication({
-      auth:{clientId:OD_CONFIG.clientId,authority:OD_CONFIG.authority,redirectUri:OD_CONFIG.redirectUri},
-      cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}
+function odInit() {
+  if (!window.msal) { console.error('[OD] MSAL nao carregado'); return null; }
+  if (_msalApp) return _msalApp;
+  if (!OD_CONFIG.clientId || OD_CONFIG.clientId === 'SEU_CLIENT_ID_AQUI') return null;
+  try {
+    _msalApp = new msal.PublicClientApplication({
+      auth: { clientId: OD_CONFIG.clientId, authority: OD_CONFIG.authority, redirectUri: OD_CONFIG.redirectUri },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true }
     });
-    _msalApp.handleRedirectPromise().catch(function(){});
+    _msalApp.handleRedirectPromise().catch(function() {});
     return _msalApp;
-  }catch(e){console.error('[OD]',e);return null;}
+  } catch(e) { console.error('[OD] init error:', e); return null; }
 }
 
-function odSync(){
-  console.log('[OD] odSync called, clientId:', OD_CONFIG.clientId);
-  if(!OD_CONFIG.clientId||OD_CONFIG.clientId==='SEU_CLIENT_ID_AQUI'){console.log('[OD] no clientId, opening setup');odShowSetup();return;}
-  var app=odInit();
-  if(!app){odShowSetup();return;}
-  odSetBtn('⏳ Conectando...',true);
-  var accounts=app.getAllAccounts();
-  _odAccount=accounts.length>0?accounts[0]:null;
-  var req={scopes:OD_CONFIG.scopes,account:_odAccount};
-  var doFetch=function(t){odSetBtn('⬇️ Baixando...',true);odFetchFile(t);};
-  if(_odAccount){
-    app.acquireTokenSilent(req).then(function(r){doFetch(r.accessToken);}).catch(function(){odLoginPopup(app,doFetch);});
-  }else{odLoginPopup(app,doFetch);}
+function odSync() {
+  console.log('[OD] odSync called');
+  if (!OD_CONFIG.clientId || OD_CONFIG.clientId === 'SEU_CLIENT_ID_AQUI') {
+    odShowSetup(); return;
+  }
+  var app = odInit();
+  if (!app) { odShowSetup(); return; }
+  odSetBtn('Conectando...', true);
+  var accounts = app.getAllAccounts();
+  _odAccount = accounts.length > 0 ? accounts[0] : null;
+  var req = { scopes: OD_CONFIG.scopes, account: _odAccount };
+  var doFetch = function(t) { odSetBtn('Baixando...', true); odFetchFile(t); };
+  if (_odAccount) {
+    app.acquireTokenSilent(req).then(function(r) { doFetch(r.accessToken); })
+      .catch(function() { odLoginPopup(app, doFetch); });
+  } else {
+    odLoginPopup(app, doFetch);
+  }
 }
 
-function odLoginPopup(app,cb){
-  odSetBtn('🔑 Login...',true);
-  app.loginPopup({scopes:OD_CONFIG.scopes}).then(function(r){
-    _odAccount=r.account;
-    return app.acquireTokenSilent({scopes:OD_CONFIG.scopes,account:_odAccount});
-  }).then(function(r){cb(r.accessToken);}).catch(function(e){
-    odSetBtn('OneDrive',false);
-    alert('Erro de autenticação:\n'+(e.message||e));
-  });
+function odLoginPopup(app, cb) {
+  odSetBtn('Login...', true);
+  app.loginPopup({ scopes: OD_CONFIG.scopes }).then(function(r) {
+    _odAccount = r.account;
+    return app.acquireTokenSilent({ scopes: OD_CONFIG.scopes, account: _odAccount });
+  }).then(function(r) { cb(r.accessToken); })
+  .catch(function(e) { odSetBtn('OneDrive', false); alert('Erro de autenticacao:\n' + (e.message || e)); });
 }
 
-function odFetchFile(token){
-  var sid=odEncodeShareUrl(OD_CONFIG.shareUrl);
-  fetch('https://graph.microsoft.com/v1.0/shares/'+sid+'/driveItem/content',
-    {headers:{'Authorization':'Bearer '+token}})
-  .then(function(r){
-    if(!r.ok)return r.json().then(function(e){throw new Error((e.error&&e.error.message)||r.status);});
+function odFetchFile(token) {
+  var sid = odEncodeShareUrl(OD_CONFIG.shareUrl);
+  fetch('https://graph.microsoft.com/v1.0/shares/' + sid + '/driveItem/content',
+    { headers: { 'Authorization': 'Bearer ' + token } })
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error((e.error && e.error.message) || r.status); });
     return r.arrayBuffer();
-  }).then(function(buf){
-    odSetBtn('⚙️ Processando...',true);
+  }).then(function(buf) {
+    odSetBtn('Processando...', true);
     odProcessBuffer(buf);
-  }).catch(function(e){
-    odSetBtn('OneDrive',false);
-    alert('Erro ao baixar:\n'+e.message);
-  });
+  }).catch(function(e) { odSetBtn('OneDrive', false); alert('Erro ao baixar:\n' + e.message); });
 }
 
-function odProcessBuffer(buf){
-  try{
-    var wb=XLSX.read(new Uint8Array(buf),{type:'array',cellFormula:true,cellNF:false,cellHTML:false,cellComment:true});
-    try{updApplyConfig(wb);}catch(_){IND_CONFIG={};}
-    var result=updParse(wb);
-    _updParsed=result;
+function odProcessBuffer(buf) {
+  try {
+    var wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellFormula: true, cellNF: false, cellHTML: false, cellComment: true });
+    try { updApplyConfig(wb); } catch(_) { IND_CONFIG = {}; }
+    var result = updParse(wb);
+    _updParsed = result;
     updShowPreview(result);
-    document.getElementById('upd-modal').style.display='flex';
-    document.getElementById('upd-filename').textContent='☁️ OneDrive — Planejamento_Estratégico_Tradição_Minas-2026.xlsx';
-    odSetBtn('OneDrive',false);
-  }catch(e){odSetBtn('OneDrive',false);alert('Erro ao processar:\n'+e.message);}
+    document.getElementById('upd-modal').style.display = 'flex';
+    document.getElementById('upd-filename').textContent = 'OneDrive - Planejamento_Estrategico_Tradicao_Minas-2026.xlsx';
+    odSetBtn('OneDrive', false);
+  } catch(e) { odSetBtn('OneDrive', false); alert('Erro ao processar:\n' + e.message); }
 }
 
-function odEncodeShareUrl(url){
-  var b64=btoa(unescape(encodeURIComponent(url)));
-  return 'u!'+b64.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+function odEncodeShareUrl(url) {
+  var b64 = btoa(unescape(encodeURIComponent(url)));
+  return 'u!' + b64.replace(/[+]/g, '-').replace(/[/]/g, '_').replace(/=+$/, '');
 }
 
-function odSetBtn(label,disabled){
-  var b=document.getElementById('od-btn'),l=document.getElementById('od-btn-lbl');
-  if(l)l.textContent=label;
-  if(b){b.disabled=!!disabled;b.style.opacity=disabled?'0.6':'1';}
+function odSetBtn(label, disabled) {
+  var b = document.getElementById('od-btn'), l = document.getElementById('od-btn-lbl');
+  if (l) l.textContent = label;
+  if (b) { b.disabled = !!disabled; b.style.opacity = disabled ? '0.6' : '1'; }
 }
 
-function odShowSetup(){
-  console.log('[OD] odShowSetup called');
-  var ex=document.getElementById('od-setup-modal');
-  if(ex){ex.style.display='flex';return;}
-  var m=document.createElement('div');
-  m.id='od-setup-modal';
-  m.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center';
-  m.innerHTML='<div style="background:var(--s1);border:1px solid var(--border);border-radius:14px;padding:28px 32px;max-width:540px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,.5)">'
-   +'<div style="font-size:16px;font-weight:700;margin-bottom:8px;color:var(--text)">☁️ Configurar integração OneDrive</div>'
-   +'<div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px">Cole o <strong>Client ID</strong> do App registrado no Azure AD. O redirect URI já está definido como <code style="background:var(--s2);padding:1px 5px;border-radius:3px;font-size:10px">https://eciquini.github.io/pe-tradicao-minas/</code></div>'
-   +'<div style="background:var(--s2);border-radius:10px;padding:13px 15px;font-size:11px;color:var(--text2);line-height:2;margin-bottom:14px">'
-   +'<b style="color:var(--accent)">Passos no Azure AD (5 min):</b><br>'
-   +'1. <a href="https://portal.azure.com" target="_blank" style="color:#0078d4">portal.azure.com</a> → Azure Active Directory → Registros de aplicativo → + Novo registro<br>'
-   +'2. Nome: <code style="background:var(--s3);padding:1px 4px;border-radius:3px">Dashboard PE 2026</code><br>'
-   +'3. Tipo de conta: <b>Contas em qualquer diretório organizacional e contas pessoais da Microsoft</b><br>'
-   +'4. URI de redirecionamento: tipo <b>SPA</b> → valor: <code style="background:var(--s3);padding:1px 4px;border-radius:3px">https://eciquini.github.io/pe-tradicao-minas/</code><br>'
-   +'5. Clique <b>Registrar</b> → copie o <b>ID do Aplicativo (cliente)</b>'
-   +'</div>'
-   +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:6px">Client ID:</label>'
-   +'<input id="od-cid" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="width:100%;padding:9px 12px;background:var(--s2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:JetBrains Mono,monospace;font-size:12px;outline:none;margin-bottom:16px">'
-   +'<div style="display:flex;gap:10px;justify-content:flex-end">'
-   +'<button onclick="odCloseSetup()" style="padding:8px 18px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text2);font-family:Sora,sans-serif;font-size:12px;cursor:pointer">Cancelar</button>'
-   +'<button onclick="odSaveClientId()" style="padding:8px 20px;border-radius:8px;border:none;background:#0078d4;color:#fff;font-family:Sora,sans-serif;font-size:12px;font-weight:700;cursor:pointer">✅ Salvar e conectar</button>'
-   +'</div></div>';
-  document.body.appendChild(m);
-  try{var s=localStorage.getItem('tm2026_od_clientid');if(s)document.getElementById('od-cid').value=s;}catch(_){}
+function odCloseSetup() {
+  var m = document.getElementById('od-setup-modal');
+  if (m) m.style.display = 'none';
 }
 
-function odSaveClientId(){
-  var val=((document.getElementById('od-cid')||{}).value||'').trim();
-  if(val.length<10){alert('Cole um Client ID válido.');return;}
-  OD_CONFIG.clientId=val;
-  try{localStorage.setItem('tm2026_od_clientid',val);}catch(_){}
-  _msalApp=null;
-  document.getElementById('od-setup-modal').style.display='none';
+function odSaveClientId() {
+  var inp = document.getElementById('od-cid');
+  var val = inp ? inp.value.trim() : '';
+  if (val.length < 10) { alert('Cole um Client ID valido.'); return; }
+  OD_CONFIG.clientId = val;
+  try { localStorage.setItem('tm2026_od_clientid', val); } catch(_) {}
+  _msalApp = null;
+  odCloseSetup();
   odSync();
 }
 
-(function(){
-  try{var s=localStorage.getItem('tm2026_od_clientid');if(s&&s.length>10)OD_CONFIG.clientId=s;}catch(_){}
+function odShowSetup() {
+  console.log('[OD] odShowSetup called');
+  var ex = document.getElementById('od-setup-modal');
+  if (ex) { ex.style.display = 'flex'; return; }
+
+  // Build modal using DOM - avoids ALL quote escaping issues
+  var overlay = document.createElement('div');
+  overlay.id = 'od-setup-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center';
+
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--s1);border:1px solid var(--border);border-radius:14px;padding:28px 32px;max-width:540px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,.5)';
+
+  var title = document.createElement('div');
+  title.style.cssText = 'font-size:16px;font-weight:700;margin-bottom:8px;color:var(--text)';
+  title.textContent = 'Configurar integracao OneDrive';
+
+  var desc = document.createElement('div');
+  desc.style.cssText = 'font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px';
+  desc.innerHTML = 'Cole o <strong>Client ID</strong> do App registrado no Azure AD.';
+
+  var steps = document.createElement('div');
+  steps.style.cssText = 'background:var(--s2);border-radius:10px;padding:13px 15px;font-size:11px;color:var(--text2);line-height:2.1;margin-bottom:14px';
+  steps.innerHTML = [
+    '<b style="color:var(--accent)">Passos no Azure AD (5 min):</b>',
+    '1. <a href="https://portal.azure.com" target="_blank" style="color:#0078d4">portal.azure.com</a> &rarr; Azure Active Directory &rarr; Registros de aplicativo &rarr; + Novo registro',
+    '2. Nome: <code style="background:var(--s3);padding:1px 4px;border-radius:3px">Dashboard PE 2026</code>',
+    '3. Tipo de conta: <b>Contas em qualquer diretorio organizacional e contas pessoais da Microsoft</b>',
+    '4. URI de redirecionamento: tipo <b>SPA</b> &rarr; valor: <code style="background:var(--s3);padding:1px 4px;border-radius:3px">https://eciquini.github.io/pe-tradicao-minas/</code>',
+    '5. Clique <b>Registrar</b> &rarr; copie o <b>ID do Aplicativo (cliente)</b>'
+  ].join('<br>');
+
+  var lbl = document.createElement('label');
+  lbl.style.cssText = 'font-size:11px;color:var(--muted);display:block;margin-bottom:6px';
+  lbl.textContent = 'Client ID:';
+
+  var inp = document.createElement('input');
+  inp.id = 'od-cid';
+  inp.type = 'text';
+  inp.placeholder = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';
+  inp.style.cssText = 'width:100%;padding:9px 12px;background:var(--s2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:JetBrains Mono,monospace;font-size:12px;outline:none;margin-bottom:16px';
+
+  var btns = document.createElement('div');
+  btns.style.cssText = 'display:flex;gap:10px;justify-content:flex-end';
+
+  var btnCancel = document.createElement('button');
+  btnCancel.textContent = 'Cancelar';
+  btnCancel.style.cssText = 'padding:8px 18px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text2);font-family:Sora,sans-serif;font-size:12px;cursor:pointer';
+  btnCancel.onclick = odCloseSetup;
+
+  var btnSave = document.createElement('button');
+  btnSave.textContent = 'Salvar e conectar';
+  btnSave.style.cssText = 'padding:8px 20px;border-radius:8px;border:none;background:#0078d4;color:#fff;font-family:Sora,sans-serif;font-size:12px;font-weight:700;cursor:pointer';
+  btnSave.onclick = odSaveClientId;
+
+  btns.appendChild(btnCancel);
+  btns.appendChild(btnSave);
+  box.appendChild(title);
+  box.appendChild(desc);
+  box.appendChild(steps);
+  box.appendChild(lbl);
+  box.appendChild(inp);
+  box.appendChild(btns);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  try { var s = localStorage.getItem('tm2026_od_clientid'); if (s) inp.value = s; } catch(_) {}
+}
+
+// Boot: load saved clientId
+(function() {
+  try { var s = localStorage.getItem('tm2026_od_clientid'); if (s && s.length > 10) OD_CONFIG.clientId = s; } catch(_) {}
 })();
 </script>
 
