@@ -2739,56 +2739,69 @@ document.addEventListener('click',function(e){
   }
 });
 </script>
-<!-- OneDrive / Microsoft Graph Integration v30 - MSAL v2 -->
+<!-- OneDrive / Microsoft Graph Integration v31 -->
 <script>
+// ── Carregar clientId salvo ANTES de definir OD_CONFIG ──
+var _savedClientId = (function() {
+  try { return localStorage.getItem('tm2026_od_clientid') || ''; } catch(_) { return ''; }
+})();
+
 var OD_CONFIG = {
-  clientId: 'SEU_CLIENT_ID_AQUI',
+  clientId: _savedClientId || 'SEU_CLIENT_ID_AQUI',
+  authority: 'https://login.microsoftonline.com/common',
   redirectUri: 'https://eciquini.github.io/pe-tradicao-minas/',
   scopes: ['Files.Read', 'User.Read'],
   shareUrl: 'https://1drv.ms/x/c/6d702c26a5c28103/IQD-VerppPQIRoC88l2EXf5wAUricDgIGcU6lgJW-E3CKkA'
 };
+
+console.log('[OD] boot - clientId:', OD_CONFIG.clientId, '| MSAL:', typeof window.msal);
+
 var _msalApp = null, _odAccount = null;
+
+function odHasClientId() {
+  return OD_CONFIG.clientId && OD_CONFIG.clientId !== 'SEU_CLIENT_ID_AQUI' && OD_CONFIG.clientId.length > 10;
+}
 
 function odGetApp() {
   if (_msalApp) return _msalApp;
-  // MSAL v2: exported as window.msal.PublicClientApplication
-  var lib = window.msal;
-  if (!lib || !lib.PublicClientApplication) {
-    console.error('[OD] MSAL v2 nao encontrado. window.msal=', typeof window.msal);
+  if (!window.msal || !window.msal.PublicClientApplication) {
+    console.error('[OD] MSAL nao carregado');
     return null;
   }
+  if (!odHasClientId()) {
+    console.warn('[OD] clientId invalido:', OD_CONFIG.clientId);
+    return null;
+  }
+  console.log('[OD] criando MSAL app com clientId:', OD_CONFIG.clientId);
   try {
-    _msalApp = new lib.PublicClientApplication({
+    _msalApp = new window.msal.PublicClientApplication({
       auth: {
         clientId: OD_CONFIG.clientId,
-        authority: 'https://login.microsoftonline.com/common',
+        authority: OD_CONFIG.authority,
         redirectUri: OD_CONFIG.redirectUri,
         navigateToLoginRequestUrl: false
       },
       cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
       system: { allowNativeBroker: false }
     });
-    console.log('[OD] MSAL v2 app criado OK');
     return _msalApp;
   } catch(e) {
-    console.error('[OD] Erro ao criar MSAL app:', e);
+    console.error('[OD] erro criar app:', e);
     return null;
   }
 }
 
 function odSync() {
-  console.log('[OD] odSync. clientId:', OD_CONFIG.clientId);
-  if (!OD_CONFIG.clientId || OD_CONFIG.clientId === 'SEU_CLIENT_ID_AQUI') {
-    odShowSetup(); return;
-  }
+  console.log('[OD] odSync - clientId:', OD_CONFIG.clientId, '| hasId:', odHasClientId());
+  if (!odHasClientId()) { odShowSetup(); return; }
+
   var app = odGetApp();
   if (!app) {
-    alert('MSAL nao carregou. Verifique a conexao com a internet e recarregue a pagina.');
+    alert('MSAL nao carregou. Recarregue a pagina e tente novamente.');
     return;
   }
   odSetBtn('Conectando...', true);
 
-  // Try silent first, then popup
   var accounts = app.getAllAccounts();
   _odAccount = accounts.length > 0 ? accounts[0] : null;
   console.log('[OD] contas em cache:', accounts.length);
@@ -2796,10 +2809,7 @@ function odSync() {
   if (_odAccount) {
     app.acquireTokenSilent({ scopes: OD_CONFIG.scopes, account: _odAccount })
       .then(function(r) { odFetchFile(r.accessToken); })
-      .catch(function(e) {
-        console.log('[OD] silent falhou, tentando popup:', e.name);
-        odPopup(app);
-      });
+      .catch(function(e) { console.log('[OD] silent falhou:', e.name); odPopup(app); });
   } else {
     odPopup(app);
   }
@@ -2813,36 +2823,29 @@ function odPopup(app) {
       console.log('[OD] login OK:', r.account.username);
       return app.acquireTokenSilent({ scopes: OD_CONFIG.scopes, account: _odAccount });
     })
-    .then(function(r) {
-      console.log('[OD] token OK, baixando arquivo...');
-      odFetchFile(r.accessToken);
-    })
+    .then(function(r) { odFetchFile(r.accessToken); })
     .catch(function(e) {
       odSetBtn('OneDrive', false);
-      console.error('[OD] popup/token error:', e);
+      console.error('[OD] popup error:', e);
       alert('Erro de autenticacao:\n' + e.message);
     });
 }
 
 function odFetchFile(token) {
   odSetBtn('Baixando...', true);
-  var sid = 'u!' + btoa(unescape(encodeURIComponent(OD_CONFIG.shareUrl)))
-    .replace(/[+]/g, '-').replace(/[/]/g, '_').replace(/=+$/, '');
-  console.log('[OD] shareId:', sid);
+  var b64 = btoa(unescape(encodeURIComponent(OD_CONFIG.shareUrl)));
+  var sid = 'u!' + b64.replace(/[+]/g, '-').replace(/[/]/g, '_').replace(/=+$/, '');
+  console.log('[OD] fetching, shareId:', sid.slice(0, 30) + '...');
   fetch('https://graph.microsoft.com/v1.0/shares/' + sid + '/driveItem/content',
     { headers: { Authorization: 'Bearer ' + token } })
   .then(function(r) {
-    console.log('[OD] HTTP status:', r.status);
-    if (!r.ok) return r.json().then(function(e) {
-      throw new Error((e.error && e.error.message) || 'HTTP ' + r.status);
-    });
+    console.log('[OD] HTTP:', r.status);
+    if (!r.ok) return r.json().then(function(e) { throw new Error((e.error && e.error.message) || 'HTTP ' + r.status); });
     return r.arrayBuffer();
   })
   .then(function(buf) {
     odSetBtn('Processando...', true);
-    var wb = XLSX.read(new Uint8Array(buf), {
-      type: 'array', cellFormula: true, cellNF: false, cellHTML: false, cellComment: true
-    });
+    var wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellFormula: true, cellNF: false, cellHTML: false, cellComment: true });
     try { updApplyConfig(wb); } catch(_) { IND_CONFIG = {}; }
     var result = updParse(wb);
     _updParsed = result;
@@ -2850,11 +2853,11 @@ function odFetchFile(token) {
     document.getElementById('upd-modal').style.display = 'flex';
     document.getElementById('upd-filename').textContent = 'OneDrive - Planejamento_Estrategico_Tradicao_Minas.xlsx';
     odSetBtn('OneDrive', false);
-    console.log('[OD] Sucesso! IRAW:', result.iraw.length, 'ARAW:', result.araw.length);
+    console.log('[OD] OK! IRAW:', result.iraw.length, 'ARAW:', result.araw.length);
   })
   .catch(function(e) {
     odSetBtn('OneDrive', false);
-    console.error('[OD] erro fetch/parse:', e);
+    console.error('[OD] erro:', e);
     alert('Erro:\n' + e.message);
   });
 }
@@ -2875,8 +2878,8 @@ function odSaveClientId() {
   var val = inp ? inp.value.trim() : '';
   if (val.length < 10) { alert('Cole um Client ID valido.'); return; }
   OD_CONFIG.clientId = val;
+  _msalApp = null; // forcar recrear com novo clientId
   try { localStorage.setItem('tm2026_od_clientid', val); } catch(_) {}
-  _msalApp = null;
   odCloseSetup();
   odSync();
 }
@@ -2904,10 +2907,9 @@ function odShowSetup() {
   steps.style.cssText = 'background:var(--s2);border-radius:10px;padding:13px 15px;font-size:11px;color:var(--text2);line-height:2.1;margin-bottom:14px';
   steps.innerHTML = [
     '<b style="color:var(--accent)">Passos no Azure AD:</b>',
-    '1. <a href="https://portal.azure.com" target="_blank" style="color:#0078d4">portal.azure.com</a> &rarr; Registros de aplicativo &rarr; + Novo registro',
-    '2. Tipo de conta: <b>Contas em qualquer diretorio + contas pessoais Microsoft</b>',
-    '3. URI de redirecionamento: tipo <b>SPA</b> &rarr; <code style="background:var(--s3);padding:1px 4px;border-radius:3px">https://eciquini.github.io/pe-tradicao-minas/</code>',
-    '4. Clique <b>Registrar</b> &rarr; copie o <b>ID do Aplicativo (cliente)</b>'
+    '1. <a href="https://portal.azure.com" target="_blank" style="color:#0078d4">portal.azure.com</a> &rarr; Registros de aplicativo &rarr; Dashboard PE 2026',
+    '2. Copie o <b>ID do Aplicativo (cliente)</b> na pagina inicial do App',
+    '3. Cole abaixo e clique Salvar'
   ].join('<br>');
 
   var lbl = document.createElement('label');
@@ -2941,11 +2943,6 @@ function odShowSetup() {
 
   try { var s = localStorage.getItem('tm2026_od_clientid'); if (s) inp.value = s; } catch(_) {}
 }
-
-// Boot: load saved clientId
-(function() {
-  try { var s = localStorage.getItem('tm2026_od_clientid'); if (s && s.length > 10) OD_CONFIG.clientId = s; } catch(_) {}
-})();
 </script>
 
 </body>
