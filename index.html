@@ -6,7 +6,7 @@
 <title>PE 2026 — Tradição Minas</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://unpkg.com/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--s1:#111318;--s2:#181c27;--s3:#1e2235;--border:#252b42;--border2:#303860;
   --accent:#e8a020;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--orange:#f97316;--blue:#3b82f6;--nd:#4b5680;
@@ -2739,124 +2739,124 @@ document.addEventListener('click',function(e){
   }
 });
 </script>
-<!-- OneDrive / Microsoft Graph Integration v29 -->
+<!-- OneDrive / Microsoft Graph Integration v30 - MSAL v2 -->
 <script>
 var OD_CONFIG = {
   clientId: 'SEU_CLIENT_ID_AQUI',
-  authority: 'https://login.microsoftonline.com/common',
   redirectUri: 'https://eciquini.github.io/pe-tradicao-minas/',
   scopes: ['Files.Read', 'User.Read'],
   shareUrl: 'https://1drv.ms/x/c/6d702c26a5c28103/IQD-VerppPQIRoC88l2EXf5wAUricDgIGcU6lgJW-E3CKkA'
 };
 var _msalApp = null, _odAccount = null;
 
-// Detecta qual namespace o MSAL exportou (v2 vs v3)
-function _getMsal() {
-  if (window.msal && window.msal.PublicClientApplication) return window.msal;
-  if (window.msalBrowser && window.msalBrowser.PublicClientApplication) return window.msalBrowser;
-  // MSAL v3 pode exportar direto no window
-  if (typeof PublicClientApplication !== 'undefined') return { PublicClientApplication: PublicClientApplication };
-  return null;
-}
-
-function odInit() {
-  var lib = _getMsal();
-  if (!lib) {
-    console.error('[OD] MSAL nao carregado. window.msal=', typeof window.msal, 'window.msalBrowser=', typeof window.msalBrowser);
+function odGetApp() {
+  if (_msalApp) return _msalApp;
+  // MSAL v2: exported as window.msal.PublicClientApplication
+  var lib = window.msal;
+  if (!lib || !lib.PublicClientApplication) {
+    console.error('[OD] MSAL v2 nao encontrado. window.msal=', typeof window.msal);
     return null;
   }
-  if (_msalApp) return _msalApp;
-  if (!OD_CONFIG.clientId || OD_CONFIG.clientId === 'SEU_CLIENT_ID_AQUI') return null;
   try {
     _msalApp = new lib.PublicClientApplication({
-      auth: { clientId: OD_CONFIG.clientId, authority: OD_CONFIG.authority, redirectUri: OD_CONFIG.redirectUri },
-      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true }
+      auth: {
+        clientId: OD_CONFIG.clientId,
+        authority: 'https://login.microsoftonline.com/common',
+        redirectUri: OD_CONFIG.redirectUri,
+        navigateToLoginRequestUrl: false
+      },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+      system: { allowNativeBroker: false }
     });
-    // MSAL v3 requer initialize() antes de usar
-    if (typeof _msalApp.initialize === 'function') {
-      return _msalApp.initialize().then(function() {
-        _msalApp.handleRedirectPromise().catch(function() {});
-        return _msalApp;
-      }).catch(function(e) { console.error('[OD] initialize error:', e); return null; });
-    }
-    _msalApp.handleRedirectPromise().catch(function() {});
+    console.log('[OD] MSAL v2 app criado OK');
     return _msalApp;
-  } catch(e) { console.error('[OD] init error:', e); return null; }
+  } catch(e) {
+    console.error('[OD] Erro ao criar MSAL app:', e);
+    return null;
+  }
 }
 
 function odSync() {
-  console.log('[OD] odSync. clientId:', OD_CONFIG.clientId, '| msal:', typeof window.msal, '| msalBrowser:', typeof window.msalBrowser);
+  console.log('[OD] odSync. clientId:', OD_CONFIG.clientId);
   if (!OD_CONFIG.clientId || OD_CONFIG.clientId === 'SEU_CLIENT_ID_AQUI') {
     odShowSetup(); return;
   }
-  // odInit pode retornar uma Promise (MSAL v3) ou o objeto direto (MSAL v2)
-  var result = odInit();
-  if (!result) { console.error('[OD] MSAL nao disponivel'); odShowSetup(); return; }
+  var app = odGetApp();
+  if (!app) {
+    alert('MSAL nao carregou. Verifique a conexao com a internet e recarregue a pagina.');
+    return;
+  }
+  odSetBtn('Conectando...', true);
 
-  var proceed = function(app) {
-    if (!app) { console.error('[OD] app null apos init'); odShowSetup(); return; }
-    _msalApp = app;
-    odSetBtn('Conectando...', true);
-    var accounts = app.getAllAccounts();
-    _odAccount = accounts.length > 0 ? accounts[0] : null;
-    console.log('[OD] accounts:', accounts.length);
-    var req = { scopes: OD_CONFIG.scopes, account: _odAccount };
-    var doFetch = function(t) { odSetBtn('Baixando...', true); odFetchFile(t); };
-    if (_odAccount) {
-      app.acquireTokenSilent(req).then(function(r) { doFetch(r.accessToken); })
-        .catch(function() { odLoginPopup(app, doFetch); });
-    } else {
-      odLoginPopup(app, doFetch);
-    }
-  };
+  // Try silent first, then popup
+  var accounts = app.getAllAccounts();
+  _odAccount = accounts.length > 0 ? accounts[0] : null;
+  console.log('[OD] contas em cache:', accounts.length);
 
-  if (result && typeof result.then === 'function') {
-    result.then(proceed).catch(function(e) { console.error('[OD] init promise error:', e); odShowSetup(); });
+  if (_odAccount) {
+    app.acquireTokenSilent({ scopes: OD_CONFIG.scopes, account: _odAccount })
+      .then(function(r) { odFetchFile(r.accessToken); })
+      .catch(function(e) {
+        console.log('[OD] silent falhou, tentando popup:', e.name);
+        odPopup(app);
+      });
   } else {
-    proceed(result);
+    odPopup(app);
   }
 }
 
-function odLoginPopup(app, cb) {
+function odPopup(app) {
   odSetBtn('Login...', true);
-  app.loginPopup({ scopes: OD_CONFIG.scopes }).then(function(r) {
-    _odAccount = r.account;
-    return app.acquireTokenSilent({ scopes: OD_CONFIG.scopes, account: _odAccount });
-  }).then(function(r) { cb(r.accessToken); })
-  .catch(function(e) { odSetBtn('OneDrive', false); alert('Erro de autenticacao:\n' + (e.message || e)); });
+  app.loginPopup({ scopes: OD_CONFIG.scopes, prompt: 'select_account' })
+    .then(function(r) {
+      _odAccount = r.account;
+      console.log('[OD] login OK:', r.account.username);
+      return app.acquireTokenSilent({ scopes: OD_CONFIG.scopes, account: _odAccount });
+    })
+    .then(function(r) {
+      console.log('[OD] token OK, baixando arquivo...');
+      odFetchFile(r.accessToken);
+    })
+    .catch(function(e) {
+      odSetBtn('OneDrive', false);
+      console.error('[OD] popup/token error:', e);
+      alert('Erro de autenticacao:\n' + e.message);
+    });
 }
 
 function odFetchFile(token) {
-  var sid = odEncodeShareUrl(OD_CONFIG.shareUrl);
-  console.log('[OD] fetching shareId:', sid);
+  odSetBtn('Baixando...', true);
+  var sid = 'u!' + btoa(unescape(encodeURIComponent(OD_CONFIG.shareUrl)))
+    .replace(/[+]/g, '-').replace(/[/]/g, '_').replace(/=+$/, '');
+  console.log('[OD] shareId:', sid);
   fetch('https://graph.microsoft.com/v1.0/shares/' + sid + '/driveItem/content',
-    { headers: { 'Authorization': 'Bearer ' + token } })
+    { headers: { Authorization: 'Bearer ' + token } })
   .then(function(r) {
-    console.log('[OD] fetch response status:', r.status);
-    if (!r.ok) return r.json().then(function(e) { throw new Error((e.error && e.error.message) || ('HTTP ' + r.status)); });
+    console.log('[OD] HTTP status:', r.status);
+    if (!r.ok) return r.json().then(function(e) {
+      throw new Error((e.error && e.error.message) || 'HTTP ' + r.status);
+    });
     return r.arrayBuffer();
-  }).then(function(buf) {
+  })
+  .then(function(buf) {
     odSetBtn('Processando...', true);
-    odProcessBuffer(buf);
-  }).catch(function(e) { odSetBtn('OneDrive', false); alert('Erro ao baixar:\n' + e.message); });
-}
-
-function odProcessBuffer(buf) {
-  try {
-    var wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellFormula: true, cellNF: false, cellHTML: false, cellComment: true });
+    var wb = XLSX.read(new Uint8Array(buf), {
+      type: 'array', cellFormula: true, cellNF: false, cellHTML: false, cellComment: true
+    });
     try { updApplyConfig(wb); } catch(_) { IND_CONFIG = {}; }
     var result = updParse(wb);
     _updParsed = result;
     updShowPreview(result);
     document.getElementById('upd-modal').style.display = 'flex';
-    document.getElementById('upd-filename').textContent = 'OneDrive - Planejamento_Estrategico_Tradicao_Minas-2026.xlsx';
+    document.getElementById('upd-filename').textContent = 'OneDrive - Planejamento_Estrategico_Tradicao_Minas.xlsx';
     odSetBtn('OneDrive', false);
-  } catch(e) { odSetBtn('OneDrive', false); alert('Erro ao processar:\n' + e.message); }
-}
-
-function odEncodeShareUrl(url) {
-  var b64 = btoa(unescape(encodeURIComponent(url)));
-  return 'u!' + b64.replace(/[+]/g, '-').replace(/[/]/g, '_').replace(/=+$/, '');
+    console.log('[OD] Sucesso! IRAW:', result.iraw.length, 'ARAW:', result.araw.length);
+  })
+  .catch(function(e) {
+    odSetBtn('OneDrive', false);
+    console.error('[OD] erro fetch/parse:', e);
+    alert('Erro:\n' + e.message);
+  });
 }
 
 function odSetBtn(label, disabled) {
@@ -2882,7 +2882,6 @@ function odSaveClientId() {
 }
 
 function odShowSetup() {
-  console.log('[OD] odShowSetup');
   var ex = document.getElementById('od-setup-modal');
   if (ex) { ex.style.display = 'flex'; return; }
 
@@ -2903,15 +2902,13 @@ function odShowSetup() {
 
   var steps = document.createElement('div');
   steps.style.cssText = 'background:var(--s2);border-radius:10px;padding:13px 15px;font-size:11px;color:var(--text2);line-height:2.1;margin-bottom:14px';
-  var stepsLines = [
+  steps.innerHTML = [
     '<b style="color:var(--accent)">Passos no Azure AD:</b>',
     '1. <a href="https://portal.azure.com" target="_blank" style="color:#0078d4">portal.azure.com</a> &rarr; Registros de aplicativo &rarr; + Novo registro',
-    '2. Nome: <code style="background:var(--s3);padding:1px 4px;border-radius:3px">Dashboard PE 2026</code>',
-    '3. Tipo de conta: <b>Contas em qualquer diretorio organizacional e contas pessoais da Microsoft</b>',
-    '4. URI de redirecionamento: tipo <b>SPA</b> &rarr; <code style="background:var(--s3);padding:1px 4px;border-radius:3px">https://eciquini.github.io/pe-tradicao-minas/</code>',
-    '5. Clique <b>Registrar</b> &rarr; copie o <b>ID do Aplicativo (cliente)</b>'
-  ];
-  steps.innerHTML = stepsLines.join('<br>');
+    '2. Tipo de conta: <b>Contas em qualquer diretorio + contas pessoais Microsoft</b>',
+    '3. URI de redirecionamento: tipo <b>SPA</b> &rarr; <code style="background:var(--s3);padding:1px 4px;border-radius:3px">https://eciquini.github.io/pe-tradicao-minas/</code>',
+    '4. Clique <b>Registrar</b> &rarr; copie o <b>ID do Aplicativo (cliente)</b>'
+  ].join('<br>');
 
   var lbl = document.createElement('label');
   lbl.style.cssText = 'font-size:11px;color:var(--muted);display:block;margin-bottom:6px';
@@ -2926,37 +2923,28 @@ function odShowSetup() {
   var btns = document.createElement('div');
   btns.style.cssText = 'display:flex;gap:10px;justify-content:flex-end';
 
-  var btnCancel = document.createElement('button');
-  btnCancel.textContent = 'Cancelar';
-  btnCancel.style.cssText = 'padding:8px 18px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text2);font-family:Sora,sans-serif;font-size:12px;cursor:pointer';
-  btnCancel.onclick = odCloseSetup;
+  var btnC = document.createElement('button');
+  btnC.textContent = 'Cancelar';
+  btnC.style.cssText = 'padding:8px 18px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text2);font-family:Sora,sans-serif;font-size:12px;cursor:pointer';
+  btnC.onclick = odCloseSetup;
 
-  var btnSave = document.createElement('button');
-  btnSave.textContent = 'Salvar e conectar';
-  btnSave.style.cssText = 'padding:8px 20px;border-radius:8px;border:none;background:#0078d4;color:#fff;font-family:Sora,sans-serif;font-size:12px;font-weight:700;cursor:pointer';
-  btnSave.onclick = odSaveClientId;
+  var btnS = document.createElement('button');
+  btnS.textContent = 'Salvar e conectar';
+  btnS.style.cssText = 'padding:8px 20px;border-radius:8px;border:none;background:#0078d4;color:#fff;font-family:Sora,sans-serif;font-size:12px;font-weight:700;cursor:pointer';
+  btnS.onclick = odSaveClientId;
 
-  btns.appendChild(btnCancel);
-  btns.appendChild(btnSave);
-  box.appendChild(title);
-  box.appendChild(desc);
-  box.appendChild(steps);
-  box.appendChild(lbl);
-  box.appendChild(inp);
-  box.appendChild(btns);
+  btns.appendChild(btnC); btns.appendChild(btnS);
+  box.appendChild(title); box.appendChild(desc); box.appendChild(steps);
+  box.appendChild(lbl); box.appendChild(inp); box.appendChild(btns);
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 
   try { var s = localStorage.getItem('tm2026_od_clientid'); if (s) inp.value = s; } catch(_) {}
 }
 
-// Boot
+// Boot: load saved clientId
 (function() {
   try { var s = localStorage.getItem('tm2026_od_clientid'); if (s && s.length > 10) OD_CONFIG.clientId = s; } catch(_) {}
-  // Log MSAL status on load
-  window.addEventListener('load', function() {
-    console.log('[OD] MSAL status on load - window.msal:', typeof window.msal, '| _getMsal():', !!_getMsal());
-  });
 })();
 </script>
 
