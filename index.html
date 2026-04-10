@@ -1539,7 +1539,7 @@ function openModal(idx){
       indNoteEl.style.display='block';
       indNoteEl.innerHTML='<div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:4px;letter-spacing:.05em;">💬 NOTAS DO INDICADOR</div>'+
         iNotes.map(function(c){
-          var dtFmt=c.dt?c.dt.replace('T',' '):'';
+          var dtFmt=(c.dt&&typeof c.dt==='string'&&c.dt.length>4)?c.dt.replace('T',' '):'';
           return '<div style="background:rgba(59,130,246,.07);border-left:2px solid var(--accent);padding:4px 8px;margin-bottom:4px;border-radius:0 4px 4px 0;">'+
             '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">'+(c.author||'')+(dtFmt?' · '+dtFmt:'')+'</div>'+
             '<div style="font-size:11px;white-space:pre-wrap;">'+c.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>').replace(/\r/g,'')+'</div></div>';
@@ -2249,7 +2249,7 @@ function updParse(wb){
       // Detectar objetivo: col B tem fórmula =Perspectivas!...
       var cbRaw=updCellRaw(ws,ri,1);
       if(cbRaw&&typeof cbRaw.f==='string'&&cbRaw.f.indexOf('Perspectivas')>=0){
-        var cc=updCell(ws,ri,2);
+        var cc=updCell(ws,ri,1); // col B computed value (objetivo)
         if(cc)curObj=String(cc);
       }
 
@@ -2309,6 +2309,16 @@ function updParse(wb){
         if(ws[realAddr]&&ws[realAddr].c&&ws[realAddr].c.length){
           ws[realAddr].c.forEach(function(cmt){
             var txt=(cmt.t||'').trim();
+              // Fix double-encoded UTF-8 (Latin-1 stored as UTF-8)
+              try {
+                var _bytes = [];
+                for (var _ci=0; _ci<txt.length; _ci++) { _bytes.push(txt.charCodeAt(_ci)); }
+                // Check if likely double-encoded (has Â followed by 0x80-0xBF range)
+                if (_bytes.some(function(b,i){ return b===0xC2 && i+1<_bytes.length && _bytes[i+1]>=0x80 && _bytes[i+1]<=0xBF; })) {
+                  var _arr = new Uint8Array(_bytes);
+                  txt = new TextDecoder('utf-8').decode(_arr);
+                }
+              } catch(_e) {}
             if(txt){
               var author=cmt.a||cmt.author||'';
               var dt=cmt.T||cmt.d||'';
@@ -2729,7 +2739,7 @@ function showNotePopup(evt,el){
   try{notes=JSON.parse(el.getAttribute('data-notes'));}catch(e){}
   if(!notes.length)return;
   body.innerHTML=notes.map(function(c){
-    var dtFmt=c.dt?c.dt.replace('T',' '):'';
+    var dtFmt=(c.dt&&typeof c.dt==='string'&&c.dt.length>4)?c.dt.replace('T',' '):'';
     var who=(c.author||'')+(dtFmt?' · '+dtFmt:'');
     return '<div class="np-item">'+
       (who?'<div class="np-who">'+who.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</div>':'')+
